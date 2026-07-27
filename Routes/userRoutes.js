@@ -1,0 +1,1 @@
+//this will contain our routes, we will move the routes from the server.js to here.
