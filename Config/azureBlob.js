@@ -18,7 +18,7 @@ async function uploadToBlob(fileBuffer, originalName, userId) {
     blobHTTPHeaders: { blobContentType: 'application/pdf' },
   });
 
-  return blockBlobClient.url; // this becomes your cvUrl
+  return blockBlobClient.url; 
 }
 
 module.exports = { uploadToBlob };
