@@ -5,6 +5,7 @@ require("dotenv").config();
 //routes 
 const userRoutes = require('./Routes/userRoutes')
 const interviewRoutes = require('./Routes/interviewRoutes')
+ 
 
 //Models
 const userModel = require('./Models/userModel')
@@ -18,6 +19,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(userRoutes)
 app.use(interviewRoutes)
+app.use('/uploads', express.static('uploads'));
 
 async function startServer() {
     await connectDB();

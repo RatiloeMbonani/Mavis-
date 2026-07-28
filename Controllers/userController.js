@@ -119,6 +119,27 @@ const deleteUser = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+//upload cv 
+const uploadCV = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.user_id,
+      {
+        cvUrl: `/uploads/cvs/${req.file.filename}`,
+        cvFileName: req.file.originalname,
+      },
+      { new: true }
+    ).select('-password');
+
+    res.json({ message: 'CV uploaded successfully', user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 
 module.exports = {
   addNewUser,
@@ -126,5 +147,6 @@ module.exports = {
   getUsers,
   getUserWithID,
   updateUser,
-  deleteUser
+  deleteUser,
+  uploadCV
 };

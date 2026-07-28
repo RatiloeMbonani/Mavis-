@@ -25,6 +25,14 @@ const userSchema = new mongoose.Schema(
             required: true,
             select: false, // Exclude password by default
         },
+        cvUrl: {
+            type: String,
+            default: null,
+        },
+        cvFileName: {
+            type: String,
+            default: null,
+        },
     },
     {
         timestamps: true,
