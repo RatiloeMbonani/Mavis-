@@ -7,16 +7,17 @@ const {
   updateUser,
   deleteUser,
 } = require('../controllers/userController.js');
-const { 
-  protect, 
-  admin 
+const {
+  protect,
+  admin
 } = require('../Middleware/authMiddleware');
+const {authLimiter} = require('../Middleware/rateLimit.js')
 
 const router = express.Router();
 
 // Auth endpoints
 router.post('/auth/register', addNewUser);
-router.post('/auth/login', loginUser);
+router.post('/auth/login', authLimiter, loginUser);
 
 
 
