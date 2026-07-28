@@ -41,7 +41,7 @@ const loginUser = async (req, res) => {
     if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
 
     const token = jwt.sign(
-      { user_id: user._id, role: user.role },   
+      { user_id: user._id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
@@ -120,18 +120,17 @@ const deleteUser = async (req, res) => {
   }
 };
 //upload cv 
+const { uploadToBlob } = require('../Config/azureBlob');
+
 const uploadCV = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const blobUrl = await uploadToBlob(req.file.buffer, req.file.originalname, req.user.user_id);
 
     const user = await User.findByIdAndUpdate(
       req.user.user_id,
-      {
-        cvUrl: `/uploads/cvs/${req.file.filename}`,
-        cvFileName: req.file.originalname,
-      },
+      { cvUrl: blobUrl, cvFileName: req.file.originalname },
       { new: true }
     ).select('-password');
 

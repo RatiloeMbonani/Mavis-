@@ -40,3 +40,5 @@ Thumbs.db
 
 # Optional: dotenv local overrides
 .env.local
+
+uploads
