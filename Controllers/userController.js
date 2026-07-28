@@ -1,6 +1,8 @@
 const User = require('../models/userModel');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const pdfParse = require('pdf-parse');
+const { uploadToBlob } = require('../Config/azureBlob');
 
 const canAccessUser = (req, userId) => (
   req.user?.role === 'personnel' || String(req.user?.user_id) === String(userId)
@@ -120,19 +122,32 @@ const deleteUser = async (req, res) => {
   }
 };
 //upload cv 
-const { uploadToBlob } = require('../Config/azureBlob');
-
 const uploadCV = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Extract text from the PDF buffer BEFORE uploading (we already have it in memory)
+    let extractedText = '';
+    try {
+      const parsed = await pdfParse(req.file.buffer);
+      extractedText = parsed.text.trim();
+    } catch (parseErr) {
+      console.error('PDF parsing failed:', parseErr.message);
+    }
 
     const blobUrl = await uploadToBlob(req.file.buffer, req.file.originalname, req.user.user_id);
 
     const user = await User.findByIdAndUpdate(
       req.user.user_id,
-      { cvUrl: blobUrl, cvFileName: req.file.originalname },
-      { new: true }
-    ).select('-password');
+      {
+        cvUrl: blobUrl,
+        cvFileName: req.file.originalname,
+        cvText: extractedText,
+      },
+      { returnDocument: 'after' }
+    ).select('-password -cvText');
 
     res.json({ message: 'CV uploaded successfully', user });
   } catch (err) {

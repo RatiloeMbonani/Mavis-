@@ -33,6 +33,10 @@ const userSchema = new mongoose.Schema(
             type: String,
             default: null,
         },
+        cvText: {
+            type: String,
+            default: null,
+        },
     },
     {
         timestamps: true,
