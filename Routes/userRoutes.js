@@ -9,7 +9,7 @@ const {
 } = require('../controllers/userController.js');
 const { 
   protect, 
-  authorizePersonnel 
+  admin 
 } = require('../Middleware/authMiddleware');
 
 const router = express.Router();
@@ -18,11 +18,9 @@ const router = express.Router();
 router.post('/auth/register', addNewUser);
 router.post('/auth/login', loginUser);
 
-// Legacy user endpoints (optional)
-router.post('/users', addNewUser);
-router.post('/users/login', loginUser);
 
-router.get('/users', protect, authorizePersonnel, getUsers);
+
+router.get('/users', protect, admin, getUsers);
 router.get('/users/:userId', protect, getUserWithID);
 router.put('/users/:userId', protect, updateUser);
 router.delete('/users/:userId', protect, deleteUser);

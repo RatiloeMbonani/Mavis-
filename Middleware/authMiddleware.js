@@ -29,9 +29,9 @@ const authorizeUser = (req, res, next) => {
   next();
 };
 
-const authorizePersonnel = (req, res, next) => {
-  if (req.user?.role !== 'personnel') return res.status(403).json({ message: 'Not authorized' });
+const admin = (req, res, next) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ message: 'Not authorized' });
   next();
 };
 
-module.exports = { protect, authorizeUser, authorizePersonnel };
+module.exports = { protect, authorizeUser, admin };
