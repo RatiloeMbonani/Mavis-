@@ -10,7 +10,7 @@ const {
 const { 
   protect, 
   authorizePersonnel 
-} = require('../middleware/authMiddleware');
+} = require('../Middleware/authMiddleware');
 
 const router = express.Router();
 

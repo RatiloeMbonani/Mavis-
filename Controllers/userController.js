@@ -10,24 +10,21 @@ const canAccessUser = (req, userId) => (
 const addNewUser = async (req, res) => {
   try {
     const { email, password, ...rest } = req.body;
+    console.log("reached request body")
 
     const existing = await User.findOne({ email });
     if (existing) return res.status(400).json({ error: 'Email already in use' });
+    console.log("reached database")
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({ email, password, ...rest });
 
-    const user = await User.create({ email, password: hashedPassword, ...rest });
-
-    // never send the password hash back, even hashed
     const userSafe = user.toObject();
     delete userSafe.password;
 
     res.status(201).json(userSafe);
   } catch (err) {
-    if (err.name === 'ValidationError') {
-      return res.status(400).json({ error: Object.values(err.errors).map(e => e.message) });
-    }
     res.status(500).json({ error: err.message });
+    console.log("the error is not in the controller")
   }
 };
 
