@@ -3,7 +3,7 @@ const { connectDB } = require("./Config/config")
 require("dotenv").config();
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
-
+const cors =require('cors')
 //routes 
 const userRoutes = require('./Routes/userRoutes')
 const interviewRoutes = require('./Routes/interviewRoutes')
@@ -18,7 +18,7 @@ const { startMavisSession } = require('./services/geminiRelay')
 const app = express()
 
 const PORT = process.env.PORT || 5000;
-
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(userRoutes)
