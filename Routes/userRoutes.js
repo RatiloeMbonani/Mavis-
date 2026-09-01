@@ -7,7 +7,7 @@ const {
   updateUser,
   deleteUser,
   uploadCV
-} = require('../controllers/userController.js');
+} = require('../Controllers/userController.js');
 const {
   protect,
   admin

@@ -25,9 +25,9 @@ const addNewUser = async (req, res) => {
 
     res.status(201).json(userSafe);
   } catch (err) {
-    res.status(500).json({ error: err.message });
-    console.log("the error is not in the controller")
-  }
+  console.error("addNewUser error:", err);
+  res.status(500).json({ error: err.message });
+}
 };
 
 // LOGIN
