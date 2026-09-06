@@ -7,24 +7,43 @@ const interviewSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    jobTitle: String,         
-    jobDescription: String,    
+    jobTitle: String,
+    jobDescription: String,
+    cvTextSnapshot: String,
     persona: {
       type: String,
       default: "Mavis",
     },
     status: {
       type: String,
-      enum: ["in_progress", "completed", "abandoned"],
+      enum: ["in_progress", "completed", "abandoned", "cancelled"],
       default: "in_progress",
     },
-    transcript: String,        // full text transcript from Gemini Live
+    jobDescriptionEmbedding: {
+      type: [Number],
+      default: [],
+    },
+    transcript: [
+      {
+        role: { type: String, enum: ["user", "assistant"] },
+        text: String,
+        timestamp: Date,
+      },
+    ],
     feedback: {
       strengths: [String],
       weaknesses: [String],
-      score: { type: Number, min: 0, max: 100 },
+      dimensionScores: {
+        structure: Number,
+        specificity: Number,
+        relevance: Number,
+      },
+      overallScore: { type: Number, min: 0, max: 100 },
       summary: String,
+      rubricVersion: { type: Number, default: 1 },
     },
+    durationSeconds: Number,
+    tokensUsed: Number,
     startedAt: Date,
     endedAt: Date,
   },

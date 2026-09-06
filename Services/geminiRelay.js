@@ -1,152 +1,95 @@
-const { GoogleGenAI, Modality } = require("@google/genai");
+require("dotenv").config();
+const path = require("node:path");
+const { cli, defineAgent, ServerOptions, voice } = require("@livekit/agents");
+const google = require("@livekit/agents-plugin-google");
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const { ROLE_SYSTEM_INSTRUCTION } = require("../Config/roleSystemInstruction.local");
 
-async function startMavisSession(clientSocket, context, onSessionEnd) {
-  let fullTranscript = "";
-  let currentSpeaker = null;
-
-  const systemInstruction = `You are Mavis, a warm, patient, and highly empathetic mock interview coach.
-Interview Role: ${context.jobTitle || "Junior Developer"}
-Job Description: ${context.jobDescription || "Not provided"}
-Candidate CV Summary: ${context.cvText || "Not provided"}
-
-# CORE PERSONALITY & VOICE TONE
-- Speak in a calm, encouraging, and unhurried tone.
-- Keep your answers concise (1 to 3 short sentences max) for low latency.
-
-# HANDLING NERVOUSNESS, STUTTERING & HESITATION
-1. PATIENT LISTENING:
-   - Candidates may stutter, repeat words, or take long mid-sentence pauses (e.g., "I... I think... um...").
-   - DO NOT interrupt or finish their sentences while they are struggling to speak. Allow them space.
-
-2. GENTLE REASSURANCE:
-   - If the candidate stutters heavily, expresses nerves, or blocks in silence, offer warm reassurance before asking your question (e.g., "No rush at all! Take a breath, you're doing great.").
-
-# INTERVIEW FLOW
-- Ask one relevant question at a time tailored to the job description.
-- Keep the interaction feeling like a supportive conversation.`;
-
+const parseMetadata = (metadata) => {
   try {
-    const geminiSession = await ai.live.connect({
-      model: "gemini-2.5-flash-native-audio-preview-12-2025",
-      config: {
-        responseModalities: [Modality.AUDIO],
-        outputAudioTranscription: {},
-        inputAudioTranscription: {},
-        systemInstruction,
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: "Aoede" },
-          },
+    return JSON.parse(metadata || "{}");
+  } catch {
+    return {};
+  }
+};
+
+const buildSystemInstruction = (metadata) => `${ROLE_SYSTEM_INSTRUCTION}
+
+# INTERVIEW CONTEXT
+You are Mavis, conducting a structured mock interview for the role: ${metadata.jobTitle || "Junior Developer"}.
+
+Job Description: ${metadata.jobDescription || "Not provided"}
+
+Candidate Background:
+${metadata.cvText || "Not provided"}`;
+
+const agentDefinition = defineAgent({
+  async entry(ctx) {
+    await ctx.connect();
+    console.log("Mavis joined the interview room:", ctx.room.name);
+
+    const metadata = parseMetadata(ctx.room.metadata || ctx.job.metadata);
+    const systemInstruction = buildSystemInstruction(metadata);
+
+    const gemini = new google.realtime.RealtimeModel({
+      model:
+        process.env.GEMINI_LIVE_MODEL ||
+        "gemini-2.5-flash-native-audio-preview-12-2025",
+      apiKey: process.env.GOOGLE_API_KEY,
+      instructions: systemInstruction,
+      voice: "Aoede",
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
+    });
+
+    const session = new voice.AgentSession({
+      llm: gemini,
+      turnHandling: {
+        turnDetection: "realtime_llm",
+        endpointing: {
+          minDelay: 300,
+          maxDelay: 900,
         },
-      },
-      callbacks: {
-        onopen: () => {
-          console.log("Gemini session opened");
-          if (clientSocket.readyState === 1) {
-            clientSocket.send(JSON.stringify({ type: "ready" }));
-          }
-        },
-        onmessage: (message) => {
-          if (clientSocket.readyState !== 1) return;
-
-          const serverContent = message.serverContent;
-
-          // Handle interruption
-          if (serverContent?.interrupted) {
-            clientSocket.send(JSON.stringify({ type: "interrupted" }));
-            return;
-          }
-
-          // Mavis spoken response transcript
-          if (serverContent?.outputTranscription?.text) {
-            const text = serverContent.outputTranscription.text;
-            if (currentSpeaker !== "Mavis") {
-              fullTranscript += `\nMavis: `;
-              currentSpeaker = "Mavis";
-            }
-            fullTranscript += text;
-            clientSocket.send(
-              JSON.stringify({ type: "mavis_transcript", text }),
-            );
-          }
-
-          // Candidate spoken input transcript
-          if (serverContent?.inputTranscription?.text) {
-            const text = serverContent.inputTranscription.text;
-            if (currentSpeaker !== "Candidate") {
-              fullTranscript += `\nCandidate: `;
-              currentSpeaker = "Candidate";
-            }
-            fullTranscript += text;
-            clientSocket.send(
-              JSON.stringify({ type: "candidate_transcript", text }),
-            );
-          }
-
-          // Audio output
-          if (message.data) {
-            clientSocket.send(
-              JSON.stringify({ type: "audio", data: message.data }),
-            );
-          }
-
-          if (serverContent?.turnComplete) {
-            clientSocket.send(JSON.stringify({ type: "turn_complete" }));
-          }
-        },
-        onerror: (err) => {
-          console.error("Gemini Live error:", err);
-          if (clientSocket.readyState === 1) {
-            clientSocket.send(
-              JSON.stringify({ type: "error", message: err.message }),
-            );
-          }
-        },
-        onclose: (event) => {
-          console.log(
-            "Gemini session closed:",
-            event?.reason || "normal close",
-          );
-          onSessionEnd(fullTranscript.trim());
+        interruption: {
+          mode: "adaptive",
+          minDuration: 300,
+          resumeFalseInterruption: true,
         },
       },
     });
 
-    clientSocket.on("message", (rawMessage) => {
-      try {
-        const msg = JSON.parse(rawMessage);
-
-        if (msg.type === "audio_chunk" && msg.data) {
-          geminiSession.sendRealtimeInput({
-            audio: {
-              data: msg.data,
-              mimeType: "audio/pcm;rate=16000",
-            },
-          });
-        }
-
-        if (msg.type === "end_session") {
-          geminiSession.close();
-        }
-      } catch (err) {
-        console.error("WS parse error:", err);
+    // Stream transcripts as room attributes so the client/UI can render live captions
+    // and so the full transcript is available afterward for the offline scoring pass.
+    session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
+      if (event.isFinal && event.transcript) {
+        ctx.room.localParticipant.setAttributes({
+          candidate_text: event.transcript,
+        });
       }
     });
 
-    clientSocket.on("close", () => {
-      geminiSession.close();
+    session.on(voice.AgentSessionEventTypes.ConversationItemAdded, (event) => {
+      const text = event.item?.textContent;
+      if (event.item?.role === "assistant" && text) {
+        ctx.room.localParticipant.setAttributes({ mavis_text: text });
+      }
     });
-  } catch (err) {
-    console.error("Failed to start Gemini session:", err);
-    clientSocket.send(
-      JSON.stringify({
-        type: "error",
-        message: "Failed to connect to Gemini Live API.",
-      }),
-    );
-  }
-}
 
-module.exports = { startMavisSession };
+    await session.start({
+      agent: new voice.Agent({ instructions: systemInstruction }),
+      room: ctx.room,
+    });
+
+    session.generateReply({
+      instructions:
+        "Briefly introduce yourself as the interviewer and ask the first question. No warm-up small talk — get straight into it.",
+      allowInterruptions: true,
+    });
+  },
+});
+
+module.exports = agentDefinition;
+
+if (require.main === module) {
+  cli.runApp(new ServerOptions({ agent: path.resolve(__filename) }));
+}

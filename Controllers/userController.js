@@ -1,11 +1,11 @@
-const User = require('../models/userModel');
+const User = require('../Models/userModel');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pdfParse = require('pdf-parse');
 const { uploadToBlob } = require('../Config/azureBlob');
 
 const canAccessUser = (req, userId) => (
-  req.user?.role === 'personnel' || String(req.user?.user_id) === String(userId)
+  ['admin', 'personnel'].includes(req.user?.role) || String(req.user?.user_id) === String(userId)
 );
 
 // CREATE (Register)

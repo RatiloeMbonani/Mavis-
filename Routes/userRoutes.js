@@ -13,7 +13,7 @@ const {
   admin
 } = require('../Middleware/authMiddleware');
 const {authLimiter} = require('../Middleware/rateLimit.js')
-const upload = require('../middleware/upload');
+const upload = require('../Middleware/upload');
 
 
 const router = express.Router();

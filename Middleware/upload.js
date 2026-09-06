@@ -4,8 +4,12 @@ const multer = require('multer');
 const storage = multer.memoryStorage(); // <-- file lands in req.file.buffer, not saved to disk
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype === 'application/pdf') cb(null, true);
-  else cb(new Error('Only PDF files are allowed'), false);
+ const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+ if (allowedTypes.includes(file.mimetype)) {
+   cb(null, true);
+ } else {
+   cb(new Error('Invalid file type. Only PDF and Word documents are allowed.'));
+ }
 };
 
 const upload = multer({

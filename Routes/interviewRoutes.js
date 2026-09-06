@@ -5,7 +5,7 @@ const {
     getInterviewById,
     endInterview,
     deleteInterview,
-} = require('../controllers/interviewController');
+} = require('../Controllers/interviewController');
 const { protect } = require('../Middleware/authMiddleware');
 const {interviewLimiter} = require('../Middleware/rateLimit')
 

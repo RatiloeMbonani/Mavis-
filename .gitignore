@@ -41,4 +41,8 @@ Thumbs.db
 # Optional: dotenv local overrides
 .env.local
 
+# Local system instruction
+Config/systemInstruction.local.js
+Config/roleSystemInstruction.local.js
+
 uploads
