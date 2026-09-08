@@ -1,7 +1,7 @@
 const User = require('../Models/userModel');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 const { uploadToBlob } = require('../Config/azureBlob');
 
 const canAccessUser = (req, userId) => (
@@ -131,8 +131,13 @@ const uploadCV = async (req, res) => {
     // Extract text from the PDF buffer BEFORE uploading (we already have it in memory)
     let extractedText = '';
     try {
-      const parsed = await pdfParse(req.file.buffer);
-      extractedText = parsed.text.trim();
+      const parser = new PDFParse({ data: req.file.buffer });
+      try {
+        const parsed = await parser.getText();
+        extractedText = parsed.text.trim();
+      } finally {
+        await parser.destroy();
+      }
     } catch (parseErr) {
       console.error('PDF parsing failed:', parseErr.message);
     }

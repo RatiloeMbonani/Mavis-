@@ -4,6 +4,7 @@ const {
     getMyInterviews,
     getInterviewById,
     endInterview,
+    updateAnswerEvaluations,
     deleteInterview,
 } = require('../Controllers/interviewController');
 const { protect } = require('../Middleware/authMiddleware');
@@ -14,6 +15,7 @@ const router = express.Router();
 router.post('/interviews', protect,interviewLimiter, startInterview);
 router.get('/interviews', protect, getMyInterviews);
 router.get('/interviews/:interviewId', protect, getInterviewById);
+router.patch('/interviews/:interviewId/evaluations', updateAnswerEvaluations);
 router.put('/interviews/:interviewId/end', protect, endInterview);
 router.delete('/interviews/:interviewId', protect, deleteInterview);
 

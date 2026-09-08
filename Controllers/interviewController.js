@@ -1,4 +1,5 @@
 const { AccessToken, AgentDispatchClient, RoomServiceClient } = require('livekit-server-sdk');
+const mongoose = require('mongoose');
 const Interview = require('../Models/interviewModel');
 const User = require('../Models/userModel');
 
@@ -172,6 +173,73 @@ const endInterview = async (req, res) => {
     }
 };
 
+// INTERNAL UPDATE — append live answer evaluations without replacing interview data
+const updateAnswerEvaluations = async (req, res) => {
+    const configuredKey = process.env.INTERNAL_API_KEY;
+    const providedKey = req.get('x-internal-api-key');
+
+    if (!configuredKey || providedKey !== configuredKey) {
+        return res.status(401).json({ error: 'Invalid internal API key' });
+    }
+
+    const { interviewId } = req.params;
+    if (!mongoose.isValidObjectId(interviewId)) {
+        return res.status(400).json({ error: 'Invalid interviewId' });
+    }
+
+    const { answerEvaluations } = req.body || {};
+    if (!Array.isArray(answerEvaluations)) {
+        return res.status(400).json({ error: 'answerEvaluations must be an array' });
+    }
+
+    const normalizedEvaluations = answerEvaluations.map((evaluation) => {
+        if (!evaluation || typeof evaluation !== 'object' || Array.isArray(evaluation)) {
+            return null;
+        }
+
+        const timestamp = new Date(evaluation.timestamp || Date.now());
+        if (Number.isNaN(timestamp.getTime())) return null;
+
+        return {
+            questionText: evaluation.questionText,
+            hasSituation: evaluation.hasSituation,
+            hasAction: evaluation.hasAction,
+            hasResult: evaluation.hasResult,
+            dimensionScores: {
+                structure: evaluation.structureScore,
+                specificity: evaluation.specificityScore,
+                relevance: evaluation.relevanceScore,
+            },
+            followUpNeeded: evaluation.followUpNeeded,
+            notes: evaluation.notes,
+            timestamp,
+        };
+    });
+
+    if (normalizedEvaluations.some((evaluation) => evaluation === null)) {
+        return res.status(400).json({ error: 'Each answer evaluation must be an object with a valid timestamp' });
+    }
+
+    try {
+        const interview = await Interview.findByIdAndUpdate(
+            interviewId,
+            { $push: { answerEvaluations: { $each: normalizedEvaluations } } },
+            { new: true, runValidators: true }
+        );
+
+        if (!interview) return res.status(404).json({ message: 'Interview not found' });
+
+        return res.json({
+            message: 'Answer evaluations saved successfully',
+            appended: normalizedEvaluations.length,
+            interviewId: interview._id,
+        });
+    } catch (err) {
+        console.error('updateAnswerEvaluations error:', err);
+        return res.status(500).json({ error: err.message });
+    }
+};
+
 // DELETE — remove a session (e.g., user clears their history)
 const deleteInterview = async (req, res) => {
     try {
@@ -195,5 +263,6 @@ module.exports = {
     getMyInterviews,
     getInterviewById,
     endInterview,
+    updateAnswerEvaluations,
     deleteInterview,
 };

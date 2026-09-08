@@ -11,7 +11,7 @@ const authLimiter = rateLimit({
 
 const interviewLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000,
-  max: 3,
+  max: 10,
   message: { error: 'Daily interview limit reached. Try again tomorrow.' },
   standardHeaders: true,
   legacyHeaders: false,

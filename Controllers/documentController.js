@@ -9,9 +9,14 @@ const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
 async function extractTextFromBuffer(buffer, mimetype) {
   try {
     if (mimetype === "application/pdf") {
-      const pdfParse = require("pdf-parse");
-      const data = await pdfParse(buffer);
-      return data.text;
+      const { PDFParse } = require("pdf-parse");
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const data = await parser.getText();
+        return data.text;
+      } finally {
+        await parser.destroy();
+      }
     }
     return null;
   } catch (err) {
