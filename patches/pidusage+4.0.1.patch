@@ -1,0 +1,15 @@
+diff --git a/node_modules/pidusage/lib/gwmi.js b/node_modules/pidusage/lib/gwmi.js
+index d33a670..23a71bf 100644
+--- a/node_modules/pidusage/lib/gwmi.js
++++ b/node_modules/pidusage/lib/gwmi.js
+@@ -33,8 +33,9 @@ function gwmi (pids, options, done) {
+ 
+   const property = 'CreationDate,KernelModeTime,ParentProcessId,ProcessId,UserModeTime,WorkingSetSize'
+   const args = ['win32_process', '-Filter', '\'' + whereClause + '\'', '| select ' + property, '| format-table']
++  const command = 'Get-WmiObject -Class ' + args[0] + ' -Filter ' + args[2] + ' ' + args.slice(3).join(' ')
+ 
+-  bin('gwmi', args, { windowsHide: true, windowsVerbatimArguments: true, shell: 'powershell.exe' }, function (err, stdout, code) {
++  bin('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true }, function (err, stdout, code) {
+     if (err) {
+       if (err.message.indexOf('No Instance(s) Available.') !== -1) {
+         const error = new Error('No matching pid found')

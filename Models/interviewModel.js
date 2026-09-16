@@ -30,11 +30,7 @@ const interviewSchema = new mongoose.Schema(
         timestamp: Date,
       },
     ],
-    // Per-answer evaluations, submitted live during the interview by the
-    // agent's submitAnswerEvaluation tool. This is the raw, granular record
-    // that `feedback` below is aggregated from — kept separately so each
-    // answer's judgment is inspectable on its own, not just folded into one
-    // final summary.
+  
     answerEvaluations: [
       {
         questionText: String,

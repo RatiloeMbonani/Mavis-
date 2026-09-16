@@ -33,7 +33,7 @@ ${metadata.cvText || "Not provided"}`;
 // database access of its own. Uses a shared internal API key rather than a
 // user JWT, since there's no logged-in user context inside the agent.
 const flushEvaluationsToBackend = async (interviewId, answerEvaluations) => {
-  if (!interviewId || !answerEvaluations?.length) return;
+  if (!interviewId || !answerEvaluations?.length) return true;
 
   const backendUrl =
     process.env.BACKEND_INTERNAL_URL || "http://localhost:5000";
@@ -57,9 +57,17 @@ const flushEvaluationsToBackend = async (interviewId, answerEvaluations) => {
         res.status,
         await res.text().catch(() => "")
       );
+      return false;
     }
+
+    console.log("Flushed answer evaluations to backend:", {
+      interviewId,
+      count: answerEvaluations.length,
+    });
+    return true;
   } catch (err) {
     console.error("Error flushing answer evaluations to backend:", err);
+    return false;
   }
 };
 
@@ -77,6 +85,7 @@ const agentDefinition = defineAgent({
 
     ctx.userData = ctx.userData || {};
     ctx.userData.answerEvaluations = [];
+    ctx.userData.pendingAnswerEvaluations = [];
 
     const submitAnswerEvaluation = llm.tool({
       description:
@@ -113,19 +122,30 @@ const agentDefinition = defineAgent({
         notes: z.string().describe("Brief internal note on why this score was given."),
       }),
       execute: async (evaluation) => {
-        ctx.userData.answerEvaluations.push({
+        const recordedEvaluation = {
           ...evaluation,
           timestamp: new Date().toISOString(),
-        });
+        };
 
-        return { recorded: true };
+        ctx.userData.answerEvaluations.push(recordedEvaluation);
+        ctx.userData.pendingAnswerEvaluations.push(recordedEvaluation);
+
+        const saved = await flushEvaluationsToBackend(interviewId, [recordedEvaluation]);
+        if (saved) {
+          ctx.userData.pendingAnswerEvaluations =
+            ctx.userData.pendingAnswerEvaluations.filter(
+              (pendingEvaluation) => pendingEvaluation !== recordedEvaluation
+            );
+        }
+
+        return { recorded: true, saved };
       },
     });
 
     const gemini = new google.realtime.RealtimeModel({
       model:
         process.env.GEMINI_LIVE_MODEL ||
-        "gemini-3.1-flash-live-preview",
+        "gemini-3.8-live",
       apiKey: process.env.GOOGLE_API_KEY,
       instructions: systemInstruction,
       voice: "Aoede",
@@ -202,7 +222,14 @@ const agentDefinition = defineAgent({
     // Flush whatever evaluations were collected once the session actually
     // closes, e.g. the candidate ends the call normally.
     session.on(voice.AgentSessionEventTypes.SessionClosed, async () => {
-      await flushEvaluationsToBackend(interviewId, ctx.userData.answerEvaluations);
+      const saved = await flushEvaluationsToBackend(
+        interviewId,
+        ctx.userData.pendingAnswerEvaluations
+      );
+
+      if (saved) {
+        ctx.userData.pendingAnswerEvaluations = [];
+      }
     });
 
     await session.start({

@@ -8,6 +8,78 @@ const canAccessInterview = (req, interview) => (
     ['admin', 'personnel'].includes(req.user?.role) || String(interview.user) === String(req.user?.user_id)
 );
 
+const normalizeTranscript = (transcript) => {
+    if (!Array.isArray(transcript)) return [];
+
+    const roleMap = {
+        candidate: 'user',
+        mavis: 'assistant',
+        user: 'user',
+        assistant: 'assistant',
+    };
+
+    return transcript.map((entry) => {
+        const rawRole = String(entry?.role || entry?.speaker || '').toLowerCase();
+        const timestamp = entry?.timestamp ? new Date(entry.timestamp) : new Date();
+
+        return {
+            role: roleMap[rawRole] || 'user',
+            text: entry?.text || '',
+            timestamp: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
+        };
+    });
+};
+
+const hasFeedbackPayload = (feedback) => (
+    feedback
+    && typeof feedback === 'object'
+    && !Array.isArray(feedback)
+    && Object.keys(feedback).length > 0
+);
+
+const buildFeedbackFromEvaluations = (answerEvaluations = []) => {
+    const evaluations = Array.isArray(answerEvaluations) ? answerEvaluations : [];
+    const dimensions = ['structure', 'specificity', 'relevance'];
+    const dimensionLabels = {
+        structure: 'Structure',
+        specificity: 'Specificity',
+        relevance: 'Relevance',
+    };
+
+    const dimensionScores = dimensions.reduce((scores, dimension) => {
+        const numericScores = evaluations
+            .map((evaluation) => Number(evaluation?.dimensionScores?.[dimension]))
+            .filter((score) => Number.isFinite(score));
+
+        scores[dimension] = numericScores.length
+            ? Number((numericScores.reduce((sum, score) => sum + score, 0) / numericScores.length).toFixed(2))
+            : 0;
+
+        return scores;
+    }, {});
+
+    const overallScore = Number((((dimensionScores.structure + dimensionScores.specificity + dimensionScores.relevance) / 30) * 100).toFixed(2));
+    const strengths = dimensions
+        .filter((dimension) => dimensionScores[dimension] >= 7)
+        .map((dimension) => `${dimensionLabels[dimension]} is a strength.`);
+    const weaknesses = dimensions
+        .filter((dimension) => dimensionScores[dimension] < 7)
+        .map((dimension) => `${dimensionLabels[dimension]} needs improvement.`);
+
+    const summary = evaluations.length
+        ? `Based on ${evaluations.length} evaluated answer${evaluations.length === 1 ? '' : 's'}, the candidate scored ${overallScore}% overall. Structure averaged ${dimensionScores.structure}/10, specificity averaged ${dimensionScores.specificity}/10, and relevance averaged ${dimensionScores.relevance}/10.`
+        : 'No answer evaluations were available, so final feedback could not be scored from interview answers.';
+
+    return {
+        strengths,
+        weaknesses,
+        dimensionScores,
+        overallScore,
+        summary,
+        rubricVersion: 1,
+    };
+};
+
 const requireLiveKitConfig = () => {
     const { LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET } = process.env;
 
@@ -158,12 +230,22 @@ const endInterview = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized' });
         }
 
-        const { transcript, feedback } = req.body;
+        const body = req.body || {};
+        const { transcript, feedback } = body;
+        const normalizedTranscript = normalizeTranscript(transcript);
+        const bodyIncludedFeedback = Object.prototype.hasOwnProperty.call(body, 'feedback');
 
-        interview.transcript = transcript;
-        interview.feedback = feedback;
+        interview.transcript = normalizedTranscript;
         interview.status = 'completed';
         interview.endedAt = new Date();
+        interview.feedback = hasFeedbackPayload(feedback) ? feedback : buildFeedbackFromEvaluations(interview.answerEvaluations);
+
+        console.log('endInterview:', {
+            interviewId: String(interview._id),
+            transcriptCount: normalizedTranscript.length,
+            answerEvaluationCount: interview.answerEvaluations?.length || 0,
+            bodyIncludedFeedback,
+        });
 
         await interview.save();
 
@@ -229,9 +311,26 @@ const updateAnswerEvaluations = async (req, res) => {
 
         if (!interview) return res.status(404).json({ message: 'Interview not found' });
 
+        let feedbackRebuilt = false;
+        if (interview.status === 'completed') {
+            interview.feedback = buildFeedbackFromEvaluations(interview.answerEvaluations);
+            await interview.save();
+            feedbackRebuilt = true;
+        }
+
+        console.log('updateAnswerEvaluations:', {
+            interviewId: String(interview._id),
+            appendedCount: normalizedEvaluations.length,
+            totalAnswerEvaluationCount: interview.answerEvaluations?.length || 0,
+            status: interview.status,
+            feedbackRebuilt,
+        });
+
         return res.json({
             message: 'Answer evaluations saved successfully',
             appended: normalizedEvaluations.length,
+            totalAnswerEvaluations: interview.answerEvaluations?.length || 0,
+            feedbackRebuilt,
             interviewId: interview._id,
         });
     } catch (err) {
@@ -259,6 +358,7 @@ const deleteInterview = async (req, res) => {
 };
 
 module.exports = {
+    buildFeedbackFromEvaluations,
     startInterview,
     getMyInterviews,
     getInterviewById,

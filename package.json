@@ -17,7 +17,8 @@
   "scripts": {
     "start": "node server.js",
     "agent": "node Services/geminiRelay.js dev",
-    "test": "npm run dev"
+    "test": "npm run dev",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.33.0",
@@ -37,5 +38,8 @@
     "pdf-parse": "^2.4.5",
     "socket.io": "^4.8.3",
     "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }
