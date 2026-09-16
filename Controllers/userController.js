@@ -1,4 +1,5 @@
 const User = require('../Models/userModel');
+const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { PDFParse } = require('pdf-parse');
@@ -7,6 +8,13 @@ const { uploadToBlob } = require('../Config/azureBlob');
 const canAccessUser = (req, userId) => (
   ['admin', 'personnel'].includes(req.user?.role) || String(req.user?.user_id) === String(userId)
 );
+
+const hasValidInternalApiKey = (req) => {
+  const configuredKey = process.env.INTERNAL_API_KEY;
+  const providedKey = req.get('x-internal-api-key');
+
+  return configuredKey && providedKey === configuredKey;
+};
 
 // CREATE (Register)
 const addNewUser = async (req, res) => {
@@ -160,6 +168,77 @@ const uploadCV = async (req, res) => {
   }
 };
 
+const incrementTokenUsage = async (req, res) => {
+  if (!hasValidInternalApiKey(req)) {
+    return res.status(401).json({ error: 'Invalid internal API key' });
+  }
+
+  const { userId } = req.params;
+  if (!mongoose.isValidObjectId(userId)) {
+    return res.status(400).json({ error: 'Invalid userId' });
+  }
+
+  const {
+    promptTokens = 0,
+    responseTokens = 0,
+    thoughtsTokens = 0,
+  } = req.body || {};
+  const totalTokens = Number(
+    req.body?.totalTokens ?? Number(promptTokens) + Number(responseTokens) + Number(thoughtsTokens)
+  );
+
+  if (!Number.isFinite(totalTokens) || totalTokens <= 0) {
+    return res.status(400).json({ error: 'totalTokens must be a positive number' });
+  }
+
+  try {
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $inc: { tokenUsage: totalTokens } },
+      { new: true, runValidators: true }
+    ).select('tokenUsage tokenLimit subscriptionTier');
+
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const percentUsed = user.tokenLimit > 0
+      ? Math.min((user.tokenUsage / user.tokenLimit) * 100, 100)
+      : 100;
+
+    res.json({
+      tokenUsage: user.tokenUsage,
+      tokenLimit: user.tokenLimit,
+      tier: user.subscriptionTier,
+      percentUsed,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+const getUserQuota = async (req, res) => {
+  try {
+    if (!canAccessUser(req, req.params.userId)) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    const user = await User.findById(req.params.userId).select('tokenUsage tokenLimit subscriptionTier');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const percentUsed = user.tokenLimit > 0
+      ? Math.min((user.tokenUsage / user.tokenLimit) * 100, 100)
+      : 100;
+
+    res.json({
+      tokenUsage: user.tokenUsage,
+      tokenLimit: user.tokenLimit,
+      tier: user.subscriptionTier,
+      percentUsed,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   addNewUser,
   loginUser,
@@ -167,5 +246,7 @@ module.exports = {
   getUserWithID,
   updateUser,
   deleteUser,
-  uploadCV
+  uploadCV,
+  incrementTokenUsage,
+  getUserQuota
 };

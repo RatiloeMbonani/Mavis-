@@ -13,3 +13,23 @@ index d33a670..23a71bf 100644
      if (err) {
        if (err.message.indexOf('No Instance(s) Available.') !== -1) {
          const error = new Error('No matching pid found')
+diff --git a/node_modules/pidusage/lib/bin.js b/node_modules/pidusage/lib/bin.js
+index 116937a..9f01745 100644
+--- a/node_modules/pidusage/lib/bin.js
++++ b/node_modules/pidusage/lib/bin.js
+@@ -37,10 +37,13 @@ function run (cmd, args, options, done) {
+     if (executed) return
+     executed = true
+ 
+-    if (stderr) {
++    const isBenignPowerShellProviderError = stderr.includes('InitializeDefaultDrives') &&
++      stderr.includes("'FileSystem' provider")
++
++    if (stderr && !isBenignPowerShellProviderError) {
+       return done(new Error(stderr))
+     }
+ 
+-    done(null, stdout, code)
++    done(null, stdout, isBenignPowerShellProviderError ? 0 : code)
+   })
+ }

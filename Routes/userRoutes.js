@@ -6,7 +6,9 @@ const {
   getUserWithID,
   updateUser,
   deleteUser,
-  uploadCV
+  uploadCV,
+  incrementTokenUsage,
+  getUserQuota
 } = require('../Controllers/userController.js');
 const {
   protect,
@@ -27,6 +29,8 @@ router.post('/users/me/cv', protect, upload.single('cv'), uploadCV);
 
 
 router.get('/users', protect, admin, getUsers);
+router.patch('/users/:userId/token-usage', incrementTokenUsage);
+router.get('/users/:userId/quota', protect, getUserQuota);
 router.get('/users/:userId', protect, getUserWithID);
 router.put('/users/:userId', protect, updateUser);
 router.delete('/users/:userId', protect, deleteUser);

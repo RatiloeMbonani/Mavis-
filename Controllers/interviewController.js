@@ -146,7 +146,12 @@ const startInterview = async (req, res) => {
         requireLiveKitConfig();
 
         const { jobTitle, jobDescription, persona } = req.body;
-        const user = await User.findById(req.user.user_id).select('full_name cvText');
+        const user = await User.findById(req.user.user_id).select('full_name cvText tokenUsage tokenLimit');
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        if ((user.tokenUsage || 0) >= (user.tokenLimit || 0)) {
+            return res.status(403).json({ error: 'Token limit reached' });
+        }
 
         const interview = await Interview.create({
             user: req.user.user_id,

@@ -71,6 +71,59 @@ const flushEvaluationsToBackend = async (interviewId, answerEvaluations) => {
   }
 };
 
+const flushTokenUsageToBackend = async (userId, tokenUsage) => {
+  if (!userId || !tokenUsage?.totalTokens) return true;
+
+  const backendUrl =
+    process.env.BACKEND_INTERNAL_URL || "http://localhost:5000";
+
+  try {
+    const res = await fetch(
+      `${backendUrl}/users/${userId}/token-usage`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-api-key": process.env.INTERNAL_API_KEY || "",
+        },
+        body: JSON.stringify(tokenUsage),
+      }
+    );
+
+    if (!res.ok) {
+      console.error(
+        "Failed to flush token usage:",
+        res.status,
+        await res.text().catch(() => "")
+      );
+      return false;
+    }
+
+    console.log("Flushed token usage to backend:", {
+      userId,
+      totalTokens: tokenUsage.totalTokens,
+    });
+    return true;
+  } catch (err) {
+    console.error("Error flushing token usage to backend:", err);
+    return false;
+  }
+};
+
+const addTokenUsage = (target, usage) => {
+  target.promptTokens += usage.promptTokens;
+  target.responseTokens += usage.responseTokens;
+  target.thoughtsTokens += usage.thoughtsTokens;
+  target.totalTokens += usage.totalTokens;
+};
+
+const emptyTokenUsage = () => ({
+  promptTokens: 0,
+  responseTokens: 0,
+  thoughtsTokens: 0,
+  totalTokens: 0,
+});
+
 const agentDefinition = defineAgent({
   async entry(ctx) {
     await ctx.connect();
@@ -82,10 +135,13 @@ const agentDefinition = defineAgent({
     // Room names are created as `mavis-interview-<interviewId>` — reused
     // here to know which interview these evaluations belong to.
     const interviewId = ctx.room.name?.replace("mavis-interview-", "");
+    const userId = metadata.userId;
 
     ctx.userData = ctx.userData || {};
     ctx.userData.answerEvaluations = [];
     ctx.userData.pendingAnswerEvaluations = [];
+    ctx.userData.tokenUsage = emptyTokenUsage();
+    ctx.userData.pendingTokenUsage = emptyTokenUsage();
 
     const submitAnswerEvaluation = llm.tool({
       description:
@@ -187,6 +243,29 @@ const agentDefinition = defineAgent({
       }
     });
 
+    session.on(voice.AgentSessionEventTypes.MetricsCollected, async (event) => {
+      const metrics = event.metrics;
+      if (metrics?.type !== "realtime_model_metrics") return;
+
+      const promptTokens = Number(metrics.inputTokens || 0);
+      const responseTokens = Number(metrics.outputTokens || 0);
+      const totalTokens = Number(metrics.totalTokens || 0);
+      const thoughtsTokens = Math.max(totalTokens - promptTokens - responseTokens, 0);
+      const usageDelta = {
+        promptTokens,
+        responseTokens,
+        thoughtsTokens,
+        totalTokens,
+      };
+
+      addTokenUsage(ctx.userData.tokenUsage, usageDelta);
+
+      const saved = await flushTokenUsageToBackend(userId, usageDelta);
+      if (!saved) {
+        addTokenUsage(ctx.userData.pendingTokenUsage, usageDelta);
+      }
+    });
+
     let candidateIsAway = false;
     let previousAgentState = null;
 
@@ -221,7 +300,7 @@ const agentDefinition = defineAgent({
 
     // Flush whatever evaluations were collected once the session actually
     // closes, e.g. the candidate ends the call normally.
-    session.on(voice.AgentSessionEventTypes.SessionClosed, async () => {
+    session.on(voice.AgentSessionEventTypes.Close, async () => {
       const saved = await flushEvaluationsToBackend(
         interviewId,
         ctx.userData.pendingAnswerEvaluations
@@ -229,6 +308,11 @@ const agentDefinition = defineAgent({
 
       if (saved) {
         ctx.userData.pendingAnswerEvaluations = [];
+      }
+
+      const tokenUsageSaved = await flushTokenUsageToBackend(userId, ctx.userData.pendingTokenUsage);
+      if (tokenUsageSaved) {
+        ctx.userData.pendingTokenUsage = emptyTokenUsage();
       }
     });
 
