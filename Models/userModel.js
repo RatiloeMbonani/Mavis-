@@ -33,6 +33,21 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    tokenUsage: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    tokenLimit: {
+      type: Number,
+      default: 100000,
+      min: 0,
+    },
+    subscriptionTier: {
+      type: String,
+      enum: ["free", "paid"],
+      default: "free",
+    },
     cvText: {
       type: String,
       default: null,
