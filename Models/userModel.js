@@ -1,6 +1,37 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 
+const tokenUsageDailySchema = new mongoose.Schema(
+  {
+    date: {
+      type: String,
+      required: true,
+      match: /^\d{4}-\d{2}-\d{2}$/,
+    },
+    promptTokens: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    responseTokens: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    thoughtsTokens: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalTokens: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     full_name: {
@@ -25,6 +56,14 @@ const userSchema = new mongoose.Schema(
       required: true,
       select: false, // Exclude password by default
     },
+    profileAvatarUrl: {
+      type: String,
+      default: null,
+    },
+    profileAvatarFileName: {
+      type: String,
+      default: null,
+    },
     cvUrl: {
       type: String,
       default: null,
@@ -38,9 +77,13 @@ const userSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    tokenUsageDaily: {
+      type: [tokenUsageDailySchema],
+      default: [],
+    },
     tokenLimit: {
       type: Number,
-      default: 100000,
+      default: 1000000,
       min: 0,
     },
     subscriptionTier: {

@@ -6,6 +6,9 @@ const {
   getUserWithID,
   updateUser,
   deleteUser,
+  deleteMyAccount,
+  uploadProfileAvatar,
+  deleteProfileAvatar,
   uploadCV,
   incrementTokenUsage,
   getUserQuota
@@ -16,6 +19,7 @@ const {
 } = require('../Middleware/authMiddleware');
 const {authLimiter} = require('../Middleware/rateLimit.js')
 const upload = require('../Middleware/upload');
+const avatarUpload = require('../Middleware/avatarUpload');
 
 
 const router = express.Router();
@@ -26,6 +30,10 @@ router.post('/auth/login', authLimiter, loginUser);
 
 
 router.post('/users/me/cv', protect, upload.single('cv'), uploadCV);
+router.post('/users/me/avatar', protect, avatarUpload, uploadProfileAvatar);
+router.patch('/users/me/avatar', protect, avatarUpload, uploadProfileAvatar);
+router.delete('/users/me/avatar', protect, deleteProfileAvatar);
+router.delete('/users/me', protect, deleteMyAccount);
 
 
 router.get('/users', protect, admin, getUsers);

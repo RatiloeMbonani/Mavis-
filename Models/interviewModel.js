@@ -16,7 +16,7 @@ const interviewSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["in_progress", "completed", "abandoned", "cancelled"],
+      enum: ["in_progress", "completed", "abandoned", "cancelled", "interrupted"],
       default: "in_progress",
     },
     jobDescriptionEmbedding: {
@@ -25,7 +25,7 @@ const interviewSchema = new mongoose.Schema(
     },
     transcript: [
       {
-        role: { type: String, enum: ["user", "assistant"] },
+        role: { type: String, enum: ["User", "Mavis"] },
         text: String,
         timestamp: Date,
       },

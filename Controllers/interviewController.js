@@ -12,10 +12,10 @@ const normalizeTranscript = (transcript) => {
     if (!Array.isArray(transcript)) return [];
 
     const roleMap = {
-        candidate: 'user',
-        mavis: 'assistant',
-        user: 'user',
-        assistant: 'assistant',
+        candidate: 'User',
+        mavis: 'Mavis',
+        user: 'User',
+        assistant: 'Mavis',
     };
 
     return transcript.map((entry) => {
@@ -23,7 +23,7 @@ const normalizeTranscript = (transcript) => {
         const timestamp = entry?.timestamp ? new Date(entry.timestamp) : new Date();
 
         return {
-            role: roleMap[rawRole] || 'user',
+            role: roleMap[rawRole] || 'User',
             text: entry?.text || '',
             timestamp: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
         };
@@ -36,6 +36,21 @@ const hasFeedbackPayload = (feedback) => (
     && !Array.isArray(feedback)
     && Object.keys(feedback).length > 0
 );
+
+const terminalInterviewStatuses = new Set(['completed', 'abandoned', 'cancelled', 'interrupted']);
+const nonScoredInterviewStatuses = new Set(['abandoned', 'cancelled', 'interrupted']);
+
+const normalizeEndStatus = (status) => {
+    if (!status) return 'completed';
+
+    const normalizedStatus = String(status).toLowerCase().trim();
+    return terminalInterviewStatuses.has(normalizedStatus) ? normalizedStatus : null;
+};
+
+const clearInterviewEvaluation = (interview) => {
+    interview.answerEvaluations = [];
+    interview.feedback = undefined;
+};
 
 const buildFeedbackFromEvaluations = (answerEvaluations = []) => {
     const evaluations = Array.isArray(answerEvaluations) ? answerEvaluations : [];
@@ -237,16 +252,29 @@ const endInterview = async (req, res) => {
 
         const body = req.body || {};
         const { transcript, feedback } = body;
+        const finalStatus = normalizeEndStatus(body.status);
+        if (!finalStatus) {
+            return res.status(400).json({
+                error: 'status must be one of completed, abandoned, cancelled, or interrupted',
+            });
+        }
+
         const normalizedTranscript = normalizeTranscript(transcript);
         const bodyIncludedFeedback = Object.prototype.hasOwnProperty.call(body, 'feedback');
 
         interview.transcript = normalizedTranscript;
-        interview.status = 'completed';
+        interview.status = finalStatus;
         interview.endedAt = new Date();
-        interview.feedback = hasFeedbackPayload(feedback) ? feedback : buildFeedbackFromEvaluations(interview.answerEvaluations);
+
+        if (finalStatus === 'completed') {
+            interview.feedback = hasFeedbackPayload(feedback) ? feedback : buildFeedbackFromEvaluations(interview.answerEvaluations);
+        } else {
+            clearInterviewEvaluation(interview);
+        }
 
         console.log('endInterview:', {
             interviewId: String(interview._id),
+            status: finalStatus,
             transcriptCount: normalizedTranscript.length,
             answerEvaluationCount: interview.answerEvaluations?.length || 0,
             bodyIncludedFeedback,
@@ -308,6 +336,28 @@ const updateAnswerEvaluations = async (req, res) => {
     }
 
     try {
+        const existingInterview = await Interview.findById(interviewId).select('status');
+        if (!existingInterview) return res.status(404).json({ message: 'Interview not found' });
+
+        if (nonScoredInterviewStatuses.has(existingInterview.status)) {
+            await Interview.findByIdAndUpdate(
+                interviewId,
+                {
+                    $set: { answerEvaluations: [] },
+                    $unset: { feedback: '' },
+                },
+                { runValidators: true }
+            );
+
+            return res.json({
+                message: `Answer evaluations ignored because interview is ${existingInterview.status}`,
+                appended: 0,
+                totalAnswerEvaluations: 0,
+                feedbackRebuilt: false,
+                interviewId,
+            });
+        }
+
         const interview = await Interview.findByIdAndUpdate(
             interviewId,
             { $push: { answerEvaluations: { $each: normalizedEvaluations } } },

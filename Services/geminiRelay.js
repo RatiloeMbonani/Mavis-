@@ -21,7 +21,7 @@ const parseMetadata = (metadata) => {
 const buildSystemInstruction = (metadata) => `${ROLE_SYSTEM_INSTRUCTION}
 
 # INTERVIEW CONTEXT
-You are Mavis, conducting a structured mock interview for the role: ${metadata.jobTitle || "Junior Developer"}.
+You are Mavis, conducting a structured mock interview for the role: ${metadata.jobTitle || "Not provided"}.
 
 Job Description: ${metadata.jobDescription || "Not provided"}
 
@@ -243,6 +243,20 @@ const agentDefinition = defineAgent({
       }
     });
 
+    let candidateIsAway = false;
+    let previousAgentState = null;
+    let pendingReminderMetrics = false;
+
+    session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+      if (event.newState === "speaking" && previousAgentState !== "speaking") {
+        console.log("Gemini response started");
+      }
+      if (event.newState === "listening" && previousAgentState === "speaking") {
+        console.log("Gemini response completed");
+      }
+      previousAgentState = event.newState;
+    });
+
     session.on(voice.AgentSessionEventTypes.MetricsCollected, async (event) => {
       const metrics = event.metrics;
       if (metrics?.type !== "realtime_model_metrics") return;
@@ -260,35 +274,44 @@ const agentDefinition = defineAgent({
 
       addTokenUsage(ctx.userData.tokenUsage, usageDelta);
 
+      if (pendingReminderMetrics) {
+        console.log("Flushed reminder token usage:", usageDelta);
+        pendingReminderMetrics = false;
+      }
+
       const saved = await flushTokenUsageToBackend(userId, usageDelta);
       if (!saved) {
         addTokenUsage(ctx.userData.pendingTokenUsage, usageDelta);
       }
     });
 
-    let candidateIsAway = false;
-    let previousAgentState = null;
-
-    session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
-      if (event.newState === "speaking" && previousAgentState !== "speaking") {
-        console.log("Gemini response started");
-      }
-      if (event.newState === "listening" && previousAgentState === "speaking") {
-        console.log("Gemini response completed");
-      }
-      previousAgentState = event.newState;
-    });
-
-    session.on(voice.AgentSessionEventTypes.UserStateChanged, (event) => {
+    session.on(voice.AgentSessionEventTypes.UserStateChanged, async (event) => {
       if (event.newState === "away") {
         if (candidateIsAway) return;
 
         candidateIsAway = true;
         console.log("Candidate became quiet");
         console.log("Reminder requested");
-        console.log(
-          "Gemini realtime does not expose a proactive response method in the installed SDK; waiting for the candidate to speak."
-        );
+
+        try {
+          pendingReminderMetrics = true;
+          await session.generateReply({
+            instructions:
+              "The candidate has gone quiet. Gently check in with a short, " +
+              "friendly line - e.g. ask if they're still there or need a moment - " +
+              "without repeating the previous question yet.",
+            allowInterruptions: true,
+          });
+        } catch (err) {
+          pendingReminderMetrics = false;
+          console.error("generateReply failed for away-nudge:", err);
+          // Fallback: bypass the realtime model entirely and just speak a fixed line via TTS/say,
+          // in case generateReply keeps timing out for this model. No token usage to track here
+          // since say() doesn't go through the LLM.
+          if (typeof session.say === "function") {
+            await session.say("Just checking - are you still there?");
+          }
+        }
         return;
       }
 
