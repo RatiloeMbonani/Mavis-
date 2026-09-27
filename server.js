@@ -8,6 +8,7 @@ const userRoutes = require('./Routes/userRoutes')
 const interviewRoutes = require('./Routes/interviewRoutes')
 const chatBotRoutes = require('./Routes/chaBotRoutes')
 const documentRoutes = require('./Routes/documentRoutes');
+const jobApplicationRoutes = require('./Routes/jobApplicationRoutes');
 const app = express()
 
 const PORT = process.env.PORT || 5000;
@@ -18,6 +19,7 @@ app.use(userRoutes)
 app.use(interviewRoutes)
 app.use(chatBotRoutes)
 app.use(documentRoutes)
+app.use(jobApplicationRoutes)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/profile-avatars', express.static(path.join(__dirname, 'uploads', 'profile-avatars')));
 

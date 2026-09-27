@@ -6,6 +6,48 @@ const { z } = require("zod");
 
 const { ROLE_SYSTEM_INSTRUCTION } = require("../Config/roleSystemInstruction.local");
 
+const DEFAULT_AGENT_MODE = "realtime";
+const DEFAULT_GEMINI_LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
+const DEFAULT_GEMINI_LLM_MODEL = "gemini-2.5-flash";
+const DEFAULT_GEMINI_STT_MODEL = "gemini-3.5-transcribe-live";
+const DEFAULT_GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview";
+const DEFAULT_GEMINI_VOICE = "Aoede";
+const DEFAULT_LIVE_TRANSCRIPTION_ENABLED = true;
+const DEFAULT_USER_AWAY_TIMEOUT_SECONDS = null;
+const DEFAULT_AWAY_NUDGE_COOLDOWN_SECONDS = 45;
+const DEFAULT_ENDPOINTING_MIN_DELAY_MS = 650;
+const DEFAULT_ENDPOINTING_MAX_DELAY_MS = 2500;
+const DEFAULT_INTERRUPTION_MIN_DURATION_MS = 900;
+const DEFAULT_INTERRUPTION_MIN_WORDS = 2;
+const DEFAULT_TTS_READ_IDLE_TIMEOUT_MS = 45000;
+const DEFAULT_FORWARD_AUDIO_IDLE_TIMEOUT_MS = 45000;
+
+const parsePositiveNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const parseOptionalPositiveNumber = (value, fallback) => {
+  if (value === undefined || value === null || value === "") return fallback;
+
+  return parsePositiveNumber(value, fallback);
+};
+
+const parseNonNegativeInteger = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const parseBoolean = (value, fallback) => {
+  if (value === undefined || value === null || value === "") return fallback;
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+
+  return fallback;
+};
+
 const parseMetadata = (metadata) => {
   try {
     return JSON.parse(metadata || "{}");
@@ -124,6 +166,182 @@ const emptyTokenUsage = () => ({
   totalTokens: 0,
 });
 
+const buildTurnHandling = (turnDetection) => ({
+  turnDetection,
+  endpointing: {
+    mode: "dynamic",
+    minDelay: parsePositiveNumber(
+      process.env.MAVIS_ENDPOINTING_MIN_DELAY_MS,
+      DEFAULT_ENDPOINTING_MIN_DELAY_MS
+    ),
+    maxDelay: parsePositiveNumber(
+      process.env.MAVIS_ENDPOINTING_MAX_DELAY_MS,
+      DEFAULT_ENDPOINTING_MAX_DELAY_MS
+    ),
+  },
+  interruption: {
+    mode: "adaptive",
+    minDuration: parsePositiveNumber(
+      process.env.MAVIS_INTERRUPTION_MIN_DURATION_MS,
+      DEFAULT_INTERRUPTION_MIN_DURATION_MS
+    ),
+    minWords: parseNonNegativeInteger(
+      process.env.MAVIS_INTERRUPTION_MIN_WORDS,
+      DEFAULT_INTERRUPTION_MIN_WORDS
+    ),
+    resumeFalseInterruption: true,
+  },
+});
+
+const buildVoiceSessionOptions = (systemInstruction) => {
+  const mode = (process.env.MAVIS_AGENT_MODE || DEFAULT_AGENT_MODE).toLowerCase();
+  const voiceName = process.env.MAVIS_GEMINI_VOICE || DEFAULT_GEMINI_VOICE;
+  const userAwayTimeout = parseOptionalPositiveNumber(
+    process.env.MAVIS_USER_AWAY_TIMEOUT_SECONDS,
+    DEFAULT_USER_AWAY_TIMEOUT_SECONDS
+  );
+  const liveTranscriptionEnabled = parseBoolean(
+    process.env.MAVIS_ENABLE_LIVE_TRANSCRIPTION,
+    DEFAULT_LIVE_TRANSCRIPTION_ENABLED
+  );
+  const startOptions = {
+    outputOptions: {
+      transcriptionEnabled: liveTranscriptionEnabled,
+      syncTranscription: liveTranscriptionEnabled,
+    },
+  };
+  const idleTimeoutOptions = {
+    ttsReadIdleTimeout: parsePositiveNumber(
+      process.env.MAVIS_TTS_READ_IDLE_TIMEOUT_MS,
+      DEFAULT_TTS_READ_IDLE_TIMEOUT_MS
+    ),
+    forwardAudioIdleTimeout: parsePositiveNumber(
+      process.env.MAVIS_FORWARD_AUDIO_IDLE_TIMEOUT_MS,
+      DEFAULT_FORWARD_AUDIO_IDLE_TIMEOUT_MS
+    ),
+  };
+
+  if (mode === "realtime") {
+    const realtimeModel = new google.realtime.RealtimeModel({
+      model: process.env.GEMINI_LIVE_MODEL || DEFAULT_GEMINI_LIVE_MODEL,
+      apiKey: process.env.GOOGLE_API_KEY,
+      instructions: systemInstruction,
+      voice: voiceName,
+      inputAudioTranscription: liveTranscriptionEnabled ? {} : null,
+      outputAudioTranscription: liveTranscriptionEnabled ? {} : null,
+      thinkingConfig: {
+        thinkingBudget: parseNonNegativeInteger(
+          process.env.MAVIS_GEMINI_THINKING_BUDGET,
+          0
+        ),
+      },
+    });
+
+    return {
+      mode,
+      liveTranscriptionEnabled,
+      sessionOptions: {
+        llm: realtimeModel,
+        turnHandling: buildTurnHandling("realtime_llm"),
+        userAwayTimeout,
+        ...idleTimeoutOptions,
+      },
+      startOptions,
+    };
+  }
+
+  console.warn(
+    "MAVIS_AGENT_MODE=pipeline is experimental with the Gemini Developer API. " +
+      "If Gemini STT fails with languageCodes errors, unset MAVIS_AGENT_MODE to use realtime mode."
+  );
+
+  const llmModel = new google.LLM({
+    model: process.env.MAVIS_LLM_MODEL || DEFAULT_GEMINI_LLM_MODEL,
+    apiKey: process.env.GOOGLE_API_KEY,
+    temperature: parsePositiveNumber(process.env.MAVIS_LLM_TEMPERATURE, 0.4),
+    maxOutputTokens: parsePositiveNumber(process.env.MAVIS_LLM_MAX_OUTPUT_TOKENS, 600),
+    thinkingConfig: {
+      thinkingBudget: parseNonNegativeInteger(
+        process.env.MAVIS_GEMINI_THINKING_BUDGET,
+        0
+      ),
+    },
+  });
+
+  const sttModel = new google.beta.GeminiSTT({
+    model: process.env.MAVIS_STT_MODEL || DEFAULT_GEMINI_STT_MODEL,
+    language: process.env.MAVIS_STT_LANGUAGE || "en-US",
+    apiKey: process.env.GOOGLE_API_KEY,
+  });
+
+  const ttsModel = new google.beta.TTS({
+    model: process.env.MAVIS_TTS_MODEL || DEFAULT_GEMINI_TTS_MODEL,
+    voiceName,
+    apiKey: process.env.GOOGLE_API_KEY,
+    instructions:
+      process.env.MAVIS_TTS_INSTRUCTIONS ||
+      "Speak naturally and clearly. Do not add words that are not in the text.",
+  });
+
+  return {
+    mode: "pipeline",
+    liveTranscriptionEnabled,
+    sessionOptions: {
+      stt: sttModel,
+      llm: llmModel,
+      tts: ttsModel,
+      turnHandling: buildTurnHandling("stt"),
+      userAwayTimeout,
+      ...idleTimeoutOptions,
+    },
+    startOptions,
+  };
+};
+
+const metricsToTokenUsage = (metrics) => {
+  if (metrics?.type === "realtime_model_metrics") {
+    const promptTokens = Number(metrics.inputTokens || 0);
+    const responseTokens = Number(metrics.outputTokens || 0);
+    const totalTokens = Number(metrics.totalTokens || 0);
+    const thoughtsTokens = Math.max(totalTokens - promptTokens - responseTokens, 0);
+
+    return {
+      promptTokens,
+      responseTokens,
+      thoughtsTokens,
+      totalTokens,
+    };
+  }
+
+  if (metrics?.type === "llm_metrics") {
+    const promptTokens = Number(metrics.promptTokens || 0);
+    const responseTokens = Number(metrics.completionTokens || 0);
+    const totalTokens = Number(metrics.totalTokens || promptTokens + responseTokens);
+
+    return {
+      promptTokens,
+      responseTokens,
+      thoughtsTokens: 0,
+      totalTokens,
+    };
+  }
+
+  if (metrics?.type === "stt_metrics" || metrics?.type === "tts_metrics") {
+    const promptTokens = Number(metrics.inputTokens || 0);
+    const responseTokens = Number(metrics.outputTokens || 0);
+    const totalTokens = promptTokens + responseTokens;
+
+    return {
+      promptTokens,
+      responseTokens,
+      thoughtsTokens: 0,
+      totalTokens,
+    };
+  }
+
+  return null;
+};
+
 const agentDefinition = defineAgent({
   async entry(ctx) {
     await ctx.connect();
@@ -198,40 +416,71 @@ const agentDefinition = defineAgent({
       },
     });
 
-    const gemini = new google.realtime.RealtimeModel({
-      model:
-        process.env.GEMINI_LIVE_MODEL ||
-        "gemini-3.8-live",
-      apiKey: process.env.GOOGLE_API_KEY,
-      instructions: systemInstruction,
-      voice: "Aoede",
-      inputAudioTranscription: {},
-      outputAudioTranscription: {},
+    const {
+      mode: agentMode,
+      liveTranscriptionEnabled,
+      sessionOptions,
+      startOptions,
+    } = buildVoiceSessionOptions(systemInstruction);
+    console.log("Starting Mavis voice session:", {
+      mode: agentMode,
+      liveTranscriptionEnabled,
     });
 
     const session = new voice.AgentSession({
-      llm: gemini,
-      turnHandling: {
-        turnDetection: "realtime_llm",
-        endpointing: {
-          minDelay: 300,
-          maxDelay: 900,
-        },
-        interruption: {
-          mode: "adaptive",
-          minDuration: 300,
-          resumeFalseInterruption: true,
-        },
-      },
-      userAwayTimeout: 8,
+      ...sessionOptions,
     });
+
+    let candidateIsAway = false;
+    let previousAgentState = null;
+    let pendingReminderMetrics = false;
+    let lastAwayNudgeAt = 0;
+    let sessionClosed = false;
+    const awayNudgeCooldownMs =
+      parsePositiveNumber(
+        process.env.MAVIS_AWAY_NUDGE_COOLDOWN_SECONDS,
+        DEFAULT_AWAY_NUDGE_COOLDOWN_SECONDS
+      ) * 1000;
+    const isSessionRunning = () => (
+      !sessionClosed
+      && !session._closing
+      && Boolean(session._activity)
+    );
+    let transcriptSequence = 0;
+    const publishTranscriptAttributes = (role, text, options = {}) => {
+      const cleanedText = String(text || "").trim();
+      if (!cleanedText) return;
+
+      transcriptSequence += 1;
+      const transcriptEvent = {
+        id: options.id || `${role}-${transcriptSequence}`,
+        role,
+        text: cleanedText,
+        final: Boolean(options.final),
+        sequence: transcriptSequence,
+        timestamp: new Date().toISOString(),
+      };
+      const legacyTextKey = role === "candidate" ? "candidate_text" : "mavis_text";
+      const eventKey =
+        role === "candidate" ? "candidate_transcript_event" : "mavis_transcript_event";
+
+      ctx.room.localParticipant.setAttributes({
+        [legacyTextKey]: cleanedText,
+        [eventKey]: JSON.stringify(transcriptEvent),
+        transcript_event: JSON.stringify(transcriptEvent),
+      }).catch((err) => {
+        console.error("Failed to publish transcript attributes:", err);
+      });
+    };
 
     // Stream transcripts as room attributes so the client/UI can render live captions
     // and so the full transcript is available afterward for the offline scoring pass.
     session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
       if (event.isFinal && event.transcript) {
-        ctx.room.localParticipant.setAttributes({
-          candidate_text: event.transcript,
+        candidateIsAway = false;
+        publishTranscriptAttributes("candidate", event.transcript, {
+          id: event.itemId,
+          final: true,
         });
       }
     });
@@ -239,13 +488,12 @@ const agentDefinition = defineAgent({
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, (event) => {
       const text = event.item?.textContent;
       if (event.item?.role === "assistant" && text) {
-        ctx.room.localParticipant.setAttributes({ mavis_text: text });
+        publishTranscriptAttributes("mavis", text, {
+          id: event.item?.id,
+          final: true,
+        });
       }
     });
-
-    let candidateIsAway = false;
-    let previousAgentState = null;
-    let pendingReminderMetrics = false;
 
     session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
       if (event.newState === "speaking" && previousAgentState !== "speaking") {
@@ -258,19 +506,8 @@ const agentDefinition = defineAgent({
     });
 
     session.on(voice.AgentSessionEventTypes.MetricsCollected, async (event) => {
-      const metrics = event.metrics;
-      if (metrics?.type !== "realtime_model_metrics") return;
-
-      const promptTokens = Number(metrics.inputTokens || 0);
-      const responseTokens = Number(metrics.outputTokens || 0);
-      const totalTokens = Number(metrics.totalTokens || 0);
-      const thoughtsTokens = Math.max(totalTokens - promptTokens - responseTokens, 0);
-      const usageDelta = {
-        promptTokens,
-        responseTokens,
-        thoughtsTokens,
-        totalTokens,
-      };
+      const usageDelta = metricsToTokenUsage(event.metrics);
+      if (!usageDelta?.totalTokens) return;
 
       addTokenUsage(ctx.userData.tokenUsage, usageDelta);
 
@@ -285,32 +522,70 @@ const agentDefinition = defineAgent({
       }
     });
 
+    session.on(voice.AgentSessionEventTypes.Error, (event) => {
+      const sessionError = event.error || {};
+      const sourceLabel =
+        typeof event.source?.label === "function"
+          ? event.source.label()
+          : event.source?.label;
+
+      console.error("Mavis voice session error:", {
+        type: sessionError.type,
+        label: sessionError.label || sourceLabel,
+        recoverable: sessionError.recoverable,
+        message: sessionError.error?.message || sessionError.message,
+        statusCode: sessionError.error?.statusCode || sessionError.statusCode,
+      });
+
+      ctx.room.localParticipant.setAttributes({
+        mavis_error: JSON.stringify({
+          type: sessionError.type || "voice_error",
+          label: sessionError.label || sourceLabel,
+          recoverable: Boolean(sessionError.recoverable),
+          message:
+            sessionError.error?.message ||
+            sessionError.message ||
+            "Voice session error",
+        }),
+      });
+    });
+
     session.on(voice.AgentSessionEventTypes.UserStateChanged, async (event) => {
       if (event.newState === "away") {
+        if (!isSessionRunning()) {
+          console.log("Away nudge skipped because the agent session is not running");
+          return;
+        }
+
         if (candidateIsAway) return;
 
+        const now = Date.now();
+        if (now - lastAwayNudgeAt < awayNudgeCooldownMs) {
+          candidateIsAway = true;
+          console.log("Candidate became quiet; away nudge skipped due to cooldown");
+          return;
+        }
+
         candidateIsAway = true;
+        lastAwayNudgeAt = now;
         console.log("Candidate became quiet");
         console.log("Reminder requested");
 
         try {
-          pendingReminderMetrics = true;
-          await session.generateReply({
-            instructions:
-              "The candidate has gone quiet. Gently check in with a short, " +
-              "friendly line - e.g. ask if they're still there or need a moment - " +
-              "without repeating the previous question yet.",
-            allowInterruptions: true,
-          });
+          if (typeof session.say === "function") {
+            await session.say("Take your time. When you're ready, keep going from where you left off.");
+          } else {
+            pendingReminderMetrics = true;
+            await session.generateReply({
+              instructions:
+                "The candidate has gone quiet. Gently check in with one short line. " +
+                "Do not repeat the previous question and do not ask multiple questions.",
+              allowInterruptions: true,
+            });
+          }
         } catch (err) {
           pendingReminderMetrics = false;
-          console.error("generateReply failed for away-nudge:", err);
-          // Fallback: bypass the realtime model entirely and just speak a fixed line via TTS/say,
-          // in case generateReply keeps timing out for this model. No token usage to track here
-          // since say() doesn't go through the LLM.
-          if (typeof session.say === "function") {
-            await session.say("Just checking - are you still there?");
-          }
+          console.error("Away nudge failed:", err);
         }
         return;
       }
@@ -324,6 +599,11 @@ const agentDefinition = defineAgent({
     // Flush whatever evaluations were collected once the session actually
     // closes, e.g. the candidate ends the call normally.
     session.on(voice.AgentSessionEventTypes.Close, async () => {
+      sessionClosed = true;
+      ctx.room.localParticipant.setAttributes({
+        mavis_session_state: "closed",
+      });
+
       const saved = await flushEvaluationsToBackend(
         interviewId,
         ctx.userData.pendingAnswerEvaluations
@@ -345,10 +625,11 @@ const agentDefinition = defineAgent({
         tools: { submitAnswerEvaluation },
       }),
       room: ctx.room,
+      ...startOptions,
     });
 
     console.log(
-      "Gemini realtime session is active; the initial response will start when the candidate speaks."
+      `Mavis ${agentMode} voice session is active; the initial response will start when the candidate speaks.`
     );
   },
 });
