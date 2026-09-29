@@ -178,6 +178,9 @@ const loginUser = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
+    console.log("JWT_SECRET length:", process.env.JWT_SECRET?.length);
+    console.log("Has newline:", process.env.JWT_SECRET?.includes("\n"));
+    console.log("Has space:", process.env.JWT_SECRET?.includes(" "));
 
     res.json({ token });
   } catch (err) {

@@ -15,6 +15,11 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.get("/api/health", (req, res) => {
+    res.json({ message: "API is running" });
+});
+
 app.use(userRoutes)
 app.use(interviewRoutes)
 app.use(chatBotRoutes)
@@ -22,6 +27,10 @@ app.use(documentRoutes)
 app.use(jobApplicationRoutes)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/profile-avatars', express.static(path.join(__dirname, 'uploads', 'profile-avatars')));
+
+app.get(/.*/, (req, res) => {
+    res.sendFile(path.join(__dirname, "index.html"));
+});
 
 async function startServer() {
     await connectDB();

@@ -15,9 +15,11 @@
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "npm run dev",
+    "dev": "start \"server\" /b npm.cmd run server && npm.cmd run agent",
     "agent": "node Services/geminiRelay.js dev",
-    "test": "npm run dev",
+    "server": "node server.js",
+    "test": "echo \"No tests configured\"",
     "postinstall": "patch-package"
   },
   "dependencies": {
